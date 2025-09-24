@@ -120,6 +120,103 @@ export default function App() {
     sendClientEvent({ type: "response.create" });
   }
 
+  // Execute function call and send result back
+  async function executeFunctionCall(callId, name, parameters) {
+    try {
+      console.log(`Executing function call: ${name}`, parameters);
+
+      // Call the server's tool endpoint
+      const response = await fetch('/tools', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, parameters }),
+      });
+
+      const result = await response.json();
+      console.log(`Function call result:`, result);
+
+      // Send the function call output back to the API
+      const outputEvent = {
+        type: 'conversation.item.create',
+        item: {
+          type: 'function_call_output',
+          call_id: callId,
+          output: JSON.stringify(result)
+        }
+      };
+
+      sendClientEvent(outputEvent);
+      sendClientEvent({ type: "response.create" });
+
+    } catch (error) {
+      console.error('Function call execution error:', error);
+
+      // Send error back to API
+      const errorEvent = {
+        type: 'conversation.item.create',
+        item: {
+          type: 'function_call_output',
+          call_id: callId,
+          output: JSON.stringify({
+            success: false,
+            message: `Function execution failed: ${error.message}`
+          })
+        }
+      };
+
+      sendClientEvent(errorEvent);
+      sendClientEvent({ type: "response.create" });
+    }
+  }
+
+  // Process server events and update transcript
+  function processServerEvent(event) {
+    // Handle tool call events
+    if (event.type === 'response.done' && event.response.output?.[0]?.type === 'function_call') {
+      // Tool call in progress
+      try {
+        const fcall = event.response.output[0];
+        const params = JSON.parse(fcall.arguments);
+        // TODO: add tool card to the Tool Panel to show it's being processed
+        executeFunctionCall(fcall.call_id, fcall.name, params);
+      } catch (parseError) {
+        console.error('Failed to parse function arguments:', parseError);
+      }
+    }
+
+    if (event.type === 'response.done') {
+      // TODO: Cleanup or remove outdated tool cards after any assistant response
+      // removeCompletedToolCards();
+    }
+  }
+
+    // Handle assistant responses
+    // if (event.type === 'response.output_text.delta') {
+    //   const content = event.delta || '';
+    //   setTranscript(prev => {
+    //     const lastMessage = prev[prev.length - 1];
+    //     if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isStreaming) {
+    //       // Update existing streaming message
+    //       return prev.map((msg, idx) =>
+    //         idx === prev.length - 1
+    //           ? { ...msg, content: msg.content + content }
+    //           : msg
+    //       );
+    //     } else {
+    //       // Start new assistant message
+    //       return [...prev, {
+    //         id: crypto.randomUUID(),
+    //         role: 'assistant',
+    //         content: content,
+    //         timestamp: new Date().toLocaleTimeString(),
+    //         isStreaming: true
+    //       }];
+    //     }
+    //   });
+    // }
+
   // Attach event listeners to the data channel when a new one is created
   useEffect(() => {
     if (dataChannel) {
@@ -131,6 +228,7 @@ export default function App() {
         }
 
         setEvents((prev) => [event, ...prev]);
+        processServerEvent(event);
       });
 
       // Set session active when the data channel is opened

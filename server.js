@@ -22,7 +22,8 @@ const NOTES_REPO_URL = process.env.NOTES_REPO_URL;
 const NOTES_REPO_BRANCH = process.env.NOTES_REPO_BRANCH || 'agent';
 const GIT_USERNAME = process.env.GIT_USERNAME || 'davdma-bot';
 const GIT_EMAIL = process.env.GIT_EMAIL || 'davidma.inspire+bot@email.com';
-const GIT_TOKEN = process.env.GIT_TOKEN;
+
+// Repo access via SSH
 
 // Initialize Git repository for notes
 const notesDir = path.join(process.cwd(), 'notes');
@@ -37,31 +38,23 @@ async function setupGitRepository() {
     throw new Error("Missing remote URL");
   }
 
+  if (!NOTES_REPO_URL.startsWith("git@github")) {
+    throw new Error("Repo URL must be by SSH (git@github...)");
+  }
+
   // Create authentication URL if token is provided
   // The remote should not have the token, will inject it using global config
   const repoUrl = NOTES_REPO_URL;
-  let urlPrefix;
-  if (!NOTES_REPO_URL.includes('github.com')) {
-    throw new Error("Only github repo url is supported.")
-  }
-  if (GIT_TOKEN) {
-    urlPrefix = `https://${GIT_USERNAME}:${GIT_TOKEN}@`;
-  } else {
-    throw new Error("Missing token");
-  }
-
   console.log('Setting up remote Git repository...');
   // Check if notes directory already exists and has a git repo
   if (fs.existsSync(notesDir) && fs.existsSync(path.join(notesDir, '.git'))) {
     // validate that it points to the right remote
     console.log('Existing Git repository found, validating remote.');
     git = simpleGit(notesDir);
-    const cur_remote = await git.remote('get-url', 'origin');
+    const cur_remote = (await git.remote(['get-url', 'origin'])).trim();
     if (cur_remote !== repoUrl) {
       throw new Error(`Existing repo remote ${cur_remote} is different from ${NOTES_REPO_URL}`);
     }
-    // add config for injecting token here
-    await git.addConfig(`url.https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/.insteadOf`, 'https://github.com/');
   } else {
     // Remove existing notes directory if it exists without git
     if (fs.existsSync(notesDir)) {
@@ -72,7 +65,6 @@ async function setupGitRepository() {
     // inject token - may need to think through this part
     await simpleGit().clone(repoUrl, notesDir);
     git = simpleGit(notesDir);
-    await git.addConfig(`url.https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/.insteadOf`, 'https://github.com/');
 
     // Checkout the specified branch
     if (NOTES_REPO_BRANCH !== 'main' && NOTES_REPO_BRANCH !== 'master') {
@@ -98,7 +90,7 @@ async function setupGitRepository() {
 }
 
 // Initialize Git repository on startup
-setupGitRepository();
+await setupGitRepository();
 
 // Tool handler functions
 async function writeNotes(content) {
@@ -340,11 +332,11 @@ const sessionConfig = JSON.stringify({
           properties: {
             timeframe: {
               type: "string",
-              description: "Time range for notes (currently returns all notes)",
+              description: "Time range for notes",
               enum: ["all", "week", "today"]
             }
           },
-          required: []
+          required: ['timeframe']
         }
       },
       {
@@ -359,7 +351,7 @@ const sessionConfig = JSON.stringify({
               description: "Search term for grepping"
             }
           },
-          required: []
+          required: ["term"]
         }
       }
     ],
