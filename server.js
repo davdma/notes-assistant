@@ -9,6 +9,9 @@ const app = express();
 app.use(express.text());
 const port = process.env.PORT || 3000;
 const apiKey = process.env.OPENAI_API_KEY;
+if (!apiKey) {
+    throw new Error("No OpenAI API key provided.");
+}
 
 // Configure Vite middleware for React client
 const vite = await createViteServer({
