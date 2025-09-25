@@ -2,7 +2,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import simpleGit from "simple-git";
+import { simpleGit, pathspec } from "simple-git";
 import "dotenv/config";
 
 const app = express();
@@ -98,6 +98,8 @@ await setupGitRepository();
 // Tool handler functions
 async function writeNotes(content) {
   // for agent notes save markdown by date
+  // DEBUG:
+  console.log('WRITING TO NOTES...')
   try {
     if (!isGitConfigured) {
       throw new Error('Git repository is not properly configured');
@@ -110,6 +112,7 @@ async function writeNotes(content) {
     // Pull latest changes from remote repository
     console.log('Pulling latest changes...');
     await git.pull('origin', NOTES_REPO_BRANCH);
+    console.log('Pulled.')
 
     // Append content to today's file
     const timestamp = new Date().toLocaleTimeString();
@@ -156,6 +159,7 @@ async function writeNotes(content) {
   }
 }
 
+// TODO: Do not include root README
 async function fetchNotesByDate(timeframe = 'all') {
   // For fetching notes fetch by recently committed or changed in git history
   const valid = ["all", "today", "week"];
@@ -170,6 +174,7 @@ async function fetchNotesByDate(timeframe = 'all') {
     // Pull latest changes from remote repository
     console.log('Pulling latest changes before fetching notes...');
     await git.pull('origin', NOTES_REPO_BRANCH);
+    console.log('Pulled.')
 
     // for nested docs inside of docusaurus may need to change this logic
     const files = fs.readdirSync(notesDir).filter(file => file.endsWith('.md'));
@@ -242,7 +247,7 @@ async function fetchNotesByGrep(term) {
     console.log(`Searching notes with git grep for term: "${term}"...`);
 
     // Run git grep across markdown files
-    const grepResult = await git.grep(term, ['--', '*.md', '*.mdx']);
+    const grepResult = await git.grep(term, [pathspec('*.md'), pathspec('*.mdx')]);
 
     if (!grepResult.paths || grepResult.paths.size === 0) {
       return {
@@ -299,11 +304,30 @@ async function fetchNotesByGrep(term) {
 
 // TODO: Tool call that asks Claude Code to fetch selectively from notes (in plan mode)
 // Set git tools server side for safety
+const systemPrompt = `
+## Goal
+You are a teacher who assists in helping the user learn on a variety of topics. You can read from their notes (to quiz them) and write to their notes (to help them record things discussed).
+
+## Unclear audio
+- Always respond in the same language the user is speaking in, if intelligible.
+- Default to English if the input language is unclear.
+- Only respond to clear audio or text.
+- If the user's audio is not clear (e.g., ambiguous input/background noise/silent/unintelligible) or if you did not fully hear or understand the user, ask for clarification using phrases:
+
+“Sorry, I didn’t catch that—could you say it again?”
+“There’s some background noise. Please repeat the last part.”
+“I only heard part of that. What did you say after ___?”
+
+## Language Rules
+- The conversation will be only in English.
+- Do not respond in any other language, even if the user asks.
+- If the user speaks another language, politely explain that support is limited to English.
+`;
 const sessionConfig = JSON.stringify({
   session: {
     type: "realtime",
     model: "gpt-realtime",
-    instructions: "You are a teacher that helps the user learn across a wide range of topics and assist in taking notes in a markdown Git repository",
+    instructions: systemPrompt,
     audio: {
       output: {
         voice: "marin",

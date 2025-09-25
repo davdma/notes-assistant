@@ -10,6 +10,7 @@ export default function App() {
   const [dataChannel, setDataChannel] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
+  const activeResponseId = useRef(null);
 
   async function startSession() {
     // Get a session token for OpenAI Realtime API
@@ -117,6 +118,10 @@ export default function App() {
     };
 
     sendClientEvent(event);
+    if (activeResponseId.current) {
+      sendClientEvent({ type: "response.cancel",
+                        response_id: activeResponseId.current })
+    }
     sendClientEvent({ type: "response.create" });
   }
 
@@ -148,6 +153,10 @@ export default function App() {
       };
 
       sendClientEvent(outputEvent);
+      if (activeResponseId.current) {
+        sendClientEvent({ type: "response.cancel",
+                          response_id: activeResponseId.current })
+      }
       sendClientEvent({ type: "response.create" });
 
     } catch (error) {
@@ -226,7 +235,13 @@ export default function App() {
         if (!event.timestamp) {
           event.timestamp = new Date().toLocaleTimeString();
         }
-
+        // track active response lifecycle for manual interrupts
+        if (event.type === "response.created") {
+          activeResponseId.current = event.response.id;
+        }
+        if (event.type === "response.done" && event.response.status !== "in_progress") {
+          activeResponseId.current = null;
+        }
         setEvents((prev) => [event, ...prev]);
         processServerEvent(event);
       });
@@ -264,12 +279,6 @@ export default function App() {
           </section>
         </section>
         <section className="absolute top-0 w-[380px] right-0 bottom-0 p-4 pt-0 overflow-y-auto">
-          <ToolPanel
-            sendClientEvent={sendClientEvent}
-            sendTextMessage={sendTextMessage}
-            events={events}
-            isSessionActive={isSessionActive}
-          />
         </section>
       </main>
     </>
