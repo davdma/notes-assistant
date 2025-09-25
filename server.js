@@ -26,10 +26,14 @@ const NOTES_REPO_BRANCH = process.env.NOTES_REPO_BRANCH || 'agent';
 const GIT_USERNAME = process.env.GIT_USERNAME || 'davdma-bot';
 const GIT_EMAIL = process.env.GIT_EMAIL || 'davidma.inspire+bot@email.com';
 
-// Repo access via SSH
+// Repo access via SSH ONLY
+// Start looking for md files from this path
+const SUB_REPO_PATH = process.env.SUB_REPO_PATH || '';
+const WRITE_REPO_PATH = process.env.WRITE_REPO_PATH || '';
 
 // Initialize Git repository for notes
-const notesDir = path.join(process.cwd(), 'notes');
+const notesDir = path.join(process.cwd(), 'notes', SUB_REPO_PATH);
+const writeDir = path.join(process.cwd(), 'notes', WRITE_REPO_PATH);
 let git = simpleGit();
 let isGitConfigured = false;
 
@@ -98,8 +102,6 @@ await setupGitRepository();
 // Tool handler functions
 async function writeNotes(content) {
   // for agent notes save markdown by date
-  // DEBUG:
-  console.log('WRITING TO NOTES...')
   try {
     if (!isGitConfigured) {
       throw new Error('Git repository is not properly configured');
@@ -107,7 +109,7 @@ async function writeNotes(content) {
 
     const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
     const fileName = `${today}.md`;
-    const filePath = path.join(notesDir, fileName);
+    const filePath = path.join(writeDir, fileName);
 
     // Pull latest changes from remote repository
     console.log('Pulling latest changes...');
@@ -176,8 +178,30 @@ async function fetchNotesByDate(timeframe = 'all') {
     await git.pull('origin', NOTES_REPO_BRANCH);
     console.log('Pulled.')
 
+    function getSinceArg(timeframe) {
+      switch (timeframe) {
+        case "today":
+          return "--since=today";   // all commits from midnight
+        case "week":
+          return "--since=1.week";  // all commits from the last 7 days
+        case "all":
+        default:
+          return null;              // no filter, all history
+      }
+    }
+    const sinceArg = getSinceArg(timeframe);
+
     // for nested docs inside of docusaurus may need to change this logic
-    const files = fs.readdirSync(notesDir).filter(file => file.endsWith('.md'));
+    const filesRaw = await git.raw([
+      'log',
+      '--pretty=',
+      '--name-only',
+      ...(sinceArg ? [sinceArg] : []),
+      '--',
+      '*.md',
+      '*.mdx'
+    ]);
+    const files = [...new Set(filesRaw.split('\n').filter(Boolean))];
 
     if (files.length === 0) {
       return {
@@ -193,37 +217,17 @@ async function fetchNotesByDate(timeframe = 'all') {
         const filePath = path.join(notesDir, file);
         const content = fs.readFileSync(filePath, 'utf8');
 
-        // use git log to get last commit date
-        const log = await git.log({ file: filePath, n: 1 });
-        const lastCommitDate = log.latest ? log.latest.date : null;
-
         return {
           filename: file,
-          content,
-          lastCommitDate
+          content
         }
       })
     )
 
-    // Filter out null (uncommitted) and sort by commit date
-    let sortedNotes = notes.filter(note => note.lastCommitDate).sort((a, b) => new Date(b.lastCommitDate) - new Date(a.lastCommitDate));
-
-    // Apply timeframe filtering
-    if (timeframe === 'today') {
-      const today = new Date().toDateString();
-      sortedNotes = sortedNotes.filter(note => {
-        return new Date(note.lastCommitDate).toDateString() === today;
-      });
-    } else if (timeframe === 'week') {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      sortedNotes = sortedNotes.filter(note => new Date(note.lastCommitDate) >= sevenDaysAgo);
-    }
     return {
       success: true,
-      message: `Found ${sortedNotes.length} note file(s) for timeframe: ${timeframe}`,
-      notes: sortedNotes,
-      totalFiles: files.length
+      message: `Found ${notes.length} note file(s) for timeframe: ${timeframe}`,
+      notes: notes
     };
   } catch (error) {
     console.error('Error fetching notes:', error);
